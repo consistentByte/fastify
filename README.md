@@ -162,3 +162,166 @@ On changing the order of registering plugins
 [15:19:52.152] INFO (22472): User Routes Registered
 [15:19:52.209] INFO (22472): Server listening at http://[::1]:3000
 [15:19:52.210] INFO (22472): Server listening at http://127.0.0.1:3000
+
+
+
+Decorators:
+Adding hooks to fastify request:
+  common use case, when a req comes, we want to decode jwt, and get the user and add it to req.
+
+  If the handler of hook isn't async, it will be stuck on the Processing when we send the req,
+  to prevent that make it async
+
+  fastify.addHook('preHandler', async (req: FastifyRequest<{Body: {user: string}}>, res: FastifyReply) => {
+    req.user = 'Saurabh Pandey';
+  })
+
+  This hook will add, user property to incoming req.
+
+  If we do not want to make this function async, then accept third parameter => done,
+  and write done()
+
+
+  fastify.addHook('preHandler', (req: FastifyRequest<{Body: {user: string}}>, res: FastifyReply, done) => {
+    req.user = 'Saurabh Pandey';
+    done();
+  })
+
+  Flaw: We are mutating req obj there that means we will lose some optimizations that are made with request for us.
+  To fix that:
+    We tell fastify that mutate this object first before you apply your optimizations and then we can change the value later.
+
+  We do that by, adding a decorator.
+
+  fastify.addRequest("PropertyToBeAddedToRequest", "Default Value");
+
+  This will work exactly the same, we will not lose any optimizations that we will have on request.
+
+  If in hook we are updating req.user to be object, then put null as default in decorator.
+
+    fastify.decorateRequest("user", null)
+    fastify.addHook('preHandler', (req: FastifyRequest<{Body: {user: string}}>, res: FastifyReply, done) => {
+        req.user = {
+          name: "Saurabh pandey"
+        };
+        done();
+    })
+
+
+    While both approaches set `req.user`, the second pattern (using **`fastify.decorateRequest()`**) is the **official and recommended Fastify best practice**.
+
+Here is why `decorateRequest` matters and the exact differences between the two:
+
+---
+
+### 1. V8 Engine Performance (Hidden Classes Optimization)
+
+JavaScript engines like V8 optimize object access by assigning a fixed "shape" or **Hidden Class** to objects.
+
+* **Without `decorateRequest`:** When you attach `req.user = ...` inside a hook, you are adding an unannounced property to `req` *after* the request object has already been instantiated. This mutates the shape of `req` at runtime, causing V8 to **de-optimize** property lookup (invalidating inline caches).
+* **With `decorateRequest("user", null)`:** Fastify pre-defines the shape of all incoming `FastifyRequest` instances during boot. Every request object is instantiated with the `user` property already present on its prototype (initialized to `null`). V8 can maintain a single, static hidden class for the request object throughout its lifecycle, leading to better throughput.
+
+---
+
+### 2. Encapsulation & Dependency Guardrails
+
+* **Without `decorateRequest`:** Fastify has no knowledge that `user` exists on the request object. If another route or plugin tries to access `req.user` before your `preHandler` hook executes, it fails silently with `undefined`.
+* **With `decorateRequest`:** Fastify registers `user` into its internal encapsulation tree. You can also use runtime checks like `fastify.hasRequestDecorator('user')` or enforce plugin dependency checks with `fastify.getDecorator('user')` during app startup.
+
+---
+
+### 3. Prevention of Reference Leaks
+
+Fastify enforces specific rules when using `decorateRequest`:
+
+```typescript
+// ❌ Fastify throws an error at startup if you try to pass an object reference:
+fastify.decorateRequest('user', { name: '' }); 
+
+```
+
+Fastify explicitly prevents passing reference types directly to `decorateRequest` because that reference would be shared across **all** HTTP requests, leading to data leaks across users. Initializing with `null` or `""` (primitive types) ensures safety and forces you to set individual request payload values inside request-scoped hooks (like `onRequest` or `preHandler`).
+
+---
+
+### 4. TypeScript Best Practices
+
+To make `req.user` fully type-safe across your entire application when using `decorateRequest`, augment Fastify’s internal module declaration rather than adding local generics on every route:
+
+```typescript
+import Fastify from 'fastify';
+
+// 1. Declare custom request decoration for TypeScript
+declare module 'fastify' {
+  interface FastifyRequest {
+    user: { name: string } | null;
+  }
+}
+
+const fastify = Fastify();
+
+// 2. Initialize decorator
+fastify.decorateRequest('user', null);
+
+// 3. Set value in hook
+fastify.addHook('preHandler', async (req, reply) => {
+  req.user = { name: 'Saurabh Pandey' }; // req.user is automatically typed!
+});
+
+```
+
+---
+
+### Summary
+
+| Metric | Without `decorateRequest` | With `decorateRequest("user", null)` |
+| --- | --- | --- |
+| **V8 Hidden Class** | Mutated dynamically (De-optimized) | Static & Preserved (Optimized) |
+| **Fastify Awareness** | Invisible to Fastify's core | Registered in Fastify's tree |
+| **Data Safety** | Manual handling | Guards against reference-sharing leaks |
+| **Recommended Usage** | Quick scripts / One-off prototypes | Production Fastify applications |
+
+
+Not quite build-time or compile-time—it actually happens at **Server Startup (Runtime)**, but *before* any HTTP requests arrive.
+
+In JavaScript, there is no true native compilation step (like in C++ or Rust) that bakes object structures at build time. Everything happens in memory when Node.js runs.
+
+Here is what "static and preserved" actually means in this context:
+
+---
+
+### The Assembly Line Analogy
+
+Think of Fastify's request object (`req`) as a car rolling off an assembly line every time a user hits your endpoint:
+
+#### 1. Without `decorateRequest` (Dynamic / Mutated)
+
+1. Server receives a request.
+2. Fastify builds a basic `req` car object.
+3. Your `preHandler` hook executes and suddenly welds a **roof rack** (`req.user`) onto that specific car.
+4. **V8's Reaction:** *"Whoa, this car's layout just changed! I have to re-calculate where everything is located in memory for this specific object."* (Performance penalty).
+
+#### 2. With `decorateRequest("user", null)` (Static / Preserved)
+
+1. **At Server Boot (`fastify.listen`):** Fastify creates a single "mold" (V8 Hidden Class / Shape) for all future request objects. This mold explicitly includes a `user` slot set to `null`.
+2. **When a request arrives:** Fastify stamps out a `req` object already containing the `user` property.
+3. Your `preHandler` hook simply replaces `null` with `{ name: 'Saurabh' }`.
+4. **V8's Reaction:** *"The shape of this object didn't change at all; only a value inside a pre-allocated slot changed. I can access this property blazingly fast!"*
+
+---
+
+### Clarifying the Timeline
+
+| Timeline Phase | What Happens |
+| --- | --- |
+| **Build / Compile Time** <br>
+
+<br>*(TypeScript / Babel)* | Types are checked and stripped. **No JavaScript runtime objects exist yet.** |
+| **Server Startup** <br>
+
+<br>*(Executing `decorateRequest`)* | Fastify defines the **static object shape/blueprint** in Node.js memory. |
+| **Request Time** <br>
+
+<br>*(Executing `preHandler`)* | Individual `req` objects are instantiated using that static blueprint and populated. |
+
+So when we say "static," we mean the **structure/shape of the object remains fixed in V8's memory** throughout the request's lifecycle, rather than being modified on the fly!

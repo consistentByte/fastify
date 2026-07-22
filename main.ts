@@ -4,6 +4,12 @@ import type { FastifyRequest, FastifyReply, FastifyInstance } from "Fastify";
 import dbConnector from './db-connector.ts';
 import { addItemsToDB, readItemsFromDB } from './db-calls.ts';
 
+declare module 'fastify' {
+  interface FastifyRequest {
+    user?: object | null; // 👈 Tells TypeScript that req.user is a valid property
+  }
+}
+
 const fastify = Fastify({
   logger: {
     transport: {
@@ -40,7 +46,7 @@ fastify.post("/api/users/1", {
     res: FastifyReply,
   ) => {
     const body = req.body; // now on hovering on req.body, we see name and age.
-    return res.code(201).send("User Created");
+    return res.code(201).send(req.user);
   },
 });
 
@@ -158,6 +164,21 @@ fastify.get('/db/get', async (req: FastifyRequest, res: FastifyReply) => {
 fastify.register(userRoutes, {
   prefix: "/api/customers",
 });
+
+// fastify.addHook('preHandler', async (req: FastifyRequest<{Body: {user: string}}>, res: FastifyReply) => {
+//     req.user = 'Saurabh Pandey';
+// })
+
+
+fastify.decorateRequest("user", null)
+fastify.addHook('preHandler', (req: FastifyRequest<{Body: {user: string}}>, res: FastifyReply, done) => {
+    req.user = {
+      name: "Saurabh pandey"
+    };
+    done();
+})
+
+
 
 async function main() {
   await fastify.listen({

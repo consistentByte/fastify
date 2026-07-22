@@ -99,3 +99,25 @@ fastify.route({
 ```
 
 > **Note:** While TypeScript checks this during development, remember to also use Fastify's JSON Schema validation (e.g., `schema: { body: ... }`) if you want runtime validation for incoming HTTP data!
+
+
+
+fastify.register(userRoutes, {
+  prefix: '/api/customers'
+})
+
+this is how we can group our routes based on a prefix.
+
+There are large number of plugins, that we can add in our fastify server.
+@fastify/compress
+Fastify compression utils.
+
+@fastify/cookie
+Parse and set cookie headers.
+
+@fastify/cors
+Enables the use of CORS in a Fastify application.
+
+and so on https://fastify.dev/ecosystem/
+
+Mongo Express UI => http://localhost:8081/

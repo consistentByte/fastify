@@ -130,11 +130,6 @@ const userRoutes = async (fastify: FastifyInstance) => {
   fastify.log.info("User Routes Registered");
 };
 
-// registering the plugin
-fastify.register(userRoutes, {
-  prefix: "/api/customers",
-});
-
 // writing a plugin for connection to mongo db
 const dbConnector_ = async (fastify: FastifyInstance) => {
   // Fastify instance is provided, in case we are in another file.
@@ -157,6 +152,11 @@ fastify.get('/db/add', async (req: FastifyRequest, res: FastifyReply) => {
 
 fastify.get('/db/get', async (req: FastifyRequest, res: FastifyReply) => {
   return await readItemsFromDB(fastify)(req, res);
+});
+
+// registering the plugin
+fastify.register(userRoutes, {
+  prefix: "/api/customers",
 });
 
 async function main() {

@@ -147,3 +147,18 @@ import fp from 'fastify-plugin';
 
 // Wrap with fp to share fastify.mongo globally across the app
 export default fp(dbConnector);
+
+
+Order of registering plugins is important.
+
+[15:15:27.597] INFO (20204): User Routes Registered
+[15:15:27.691] INFO (20204): Connected to database
+[15:15:27.736] INFO (20204): Server listening at http://[::1]:3000
+[15:15:27.738] INFO (20204): Server listening at http://127.0.0.1:3000
+[15:15:35.705] INFO (20204): incoming request
+
+On changing the order of registering plugins
+[15:19:52.150] INFO (22472): Connected to database
+[15:19:52.152] INFO (22472): User Routes Registered
+[15:19:52.209] INFO (22472): Server listening at http://[::1]:3000
+[15:19:52.210] INFO (22472): Server listening at http://127.0.0.1:3000

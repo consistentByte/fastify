@@ -1,18 +1,18 @@
 import fastifyMongodb from "@fastify/mongodb";
 import Fastify from "fastify";
 import type { FastifyRequest, FastifyReply, FastifyInstance } from "Fastify";
-import dbConnector from './db-connector.ts';
-import { addItemsToDB, readItemsFromDB } from './db-calls.ts';
+import dbConnector from "./db-connector.ts";
+import { addItemsToDB, readItemsFromDB } from "./db-calls.ts";
 
-declare module 'fastify' {
+declare module "fastify" {
   export interface FastifyRequest {
     user?: object | null; // 👈 Tells TypeScript that req.user is a valid property
   }
   export interface FastifyInstance {
-    signJwt: () => string,
+    signJwt: () => string;
     verifyJwt: () => {
-      name: string
-    }
+      name: string;
+    };
   }
 }
 
@@ -94,10 +94,22 @@ fastify.post(
   },
 );
 
+fastify.get('/err', () => {
+  return "ERROR";
+})
+
 // plugins
 // most common plugin in fastify is grouping for the routes.
 
 const userRoutes = async (fastify: FastifyInstance) => {
+  fastify.addHook("onRequest", async () => {
+    fastify.log.info("Got a request");
+  });
+
+  fastify.addHook("onResponse", (req, res: FastifyReply) => {
+    fastify.log.info(`Responding ${res.elapsedTime}`);
+  });
+
   fastify.post("/1", {
     handler: async (
       req: FastifyRequest<{
@@ -150,24 +162,24 @@ const userRoutes = async (fastify: FastifyInstance) => {
 // writing a plugin for connection to mongo db
 const dbConnector_ = async (fastify: FastifyInstance) => {
   // Fastify instance is provided, in case we are in another file.
-  
+
   // ignore the error, just a typescript error.
-  fastify.register(fastifyMongodb, {
-    url: "mongodb://localhost:27017/fastify-db",
-  });
+  // fastify.register(fastifyMongodb, {
+  //   url: "mongodb://localhost:27017/fastify-db",
+  // });
 
   fastify.log.info("Connected to database");
 };
 
 //registering the dbConnector Plugin
-fastify.register(dbConnector);
+// fastify.register(dbConnector);
 
 //db calls
-fastify.get('/db/add', async (req: FastifyRequest, res: FastifyReply) => {
+fastify.get("/db/add", async (req: FastifyRequest, res: FastifyReply) => {
   return await addItemsToDB(fastify)(req, res);
 });
 
-fastify.get('/db/get', async (req: FastifyRequest, res: FastifyReply) => {
+fastify.get("/db/get", async (req: FastifyRequest, res: FastifyReply) => {
   return await readItemsFromDB(fastify)(req, res);
 });
 
@@ -180,29 +192,32 @@ fastify.register(userRoutes, {
 //     req.user = 'Saurabh Pandey';
 // })
 
-
-fastify.decorateRequest("user", null)
-fastify.addHook('preHandler', (req: FastifyRequest<{Body: {user: string}}>, res: FastifyReply, done) => {
+fastify.decorateRequest("user", null);
+fastify.addHook(
+  "preHandler",
+  (
+    req: FastifyRequest<{ Body: { user: string } }>,
+    res: FastifyReply,
+    done,
+  ) => {
     req.user = {
-      name: "Saurabh pandey"
+      name: "Saurabh pandey",
     };
     done();
-})
-
-
-
+  },
+);
 
 // adding a decorator to sign Jwt
-fastify.decorate('signJwt', () => {
-  return 'Signed Jwt';
-})
+fastify.decorate("signJwt", () => {
+  return "Signed Jwt";
+});
 
 // adding a decorator to sign Jwt
-fastify.decorate('verifyJwt', () => {
+fastify.decorate("verifyJwt", () => {
   return {
-    name: "John wick"
+    name: "John wick",
   };
-})
+});
 
 async function main() {
   await fastify.listen({

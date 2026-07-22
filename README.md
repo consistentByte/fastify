@@ -325,3 +325,123 @@ Think of Fastify's request object (`req`) as a car rolling off an assembly line 
 <br>*(Executing `preHandler`)* | Individual `req` objects are instantiated using that static blueprint and populated. |
 
 So when we say "static," we mean the **structure/shape of the object remains fixed in V8's memory** throughout the request's lifecycle, rather than being modified on the fly!
+
+
+reply.elapsedTime canbe used as a metric to check performance.
+
+Hooks are scoped to the plugin, if placed in a plugin.
+
+In Fastify, hooks are subject to Fastify’s **encapsulation model**.
+
+If you add a hook (like `onRequest` or `preHandler`) inside a plugin using `fastify.addHook()`, it will **only execute for routes registered inside that plugin and its child plugins**. It will **not** affect parent plugins or sibling plugins elsewhere in your application tree.
+
+---
+
+### **1. How Hook Scoping Works**
+
+Fastify builds a tree of contexts whenever you use `fastify.register()`.
+
+```javascript
+// Server root context
+fastify.register(async function adminPlugin(fastify) {
+  // 🔒 This hook ONLY runs on routes inside adminPlugin!
+  fastify.addHook('onRequest', async (request, reply) => {
+    if (!request.headers.authorization) {
+      reply.code(401).send({ error: 'Unauthorized' });
+    }
+  });
+
+  // ✅ Triggered by the admin onRequest hook
+  fastify.get('/admin/dashboard', async () => ({ data: 'admin stats' }));
+});
+
+// Separate public context
+fastify.register(async function publicPlugin(fastify) {
+  // ❌ Will NOT trigger the admin onRequest hook!
+  fastify.get('/public/feed', async () => ({ data: 'public feed' }));
+});
+
+```
+
+---
+
+### **2. How Children Inherit Hooks**
+
+Hooks flow **downwards** in the encapsulation tree, never upwards or sideways.
+
+```text
+Root Server Context
+ └── Parent Plugin (Hook A added here)
+      ├── Route 1 ----> (Executes Hook A)
+      └── Child Plugin
+           ├── Hook B added here
+           └── Route 2 ----> (Executes Hook A THEN Hook B)
+
+```
+
+---
+
+### **3. The Exception: `fastify-plugin` (Breaking Encapsulation)**
+
+If you wrap your plugin function with the **`fastify-plugin`** utility (`fp`), Fastify **skips encapsulation**.
+
+In that case, any hook added inside the plugin gets attached directly to the **parent scope**, making it global across your whole app:
+
+```javascript
+import fp from 'fastify-plugin';
+
+// ⚠️ Because of `fp`, this hook becomes GLOBAL to the entire server
+export default fp(async function myGlobalPlugin(fastify) {
+  fastify.addHook('onRequest', async (request) => {
+    console.log('This will run for EVERY route across the app!');
+  });
+});
+
+```
+
+---
+
+### **Summary**
+
+* **Standard Plugin (`fastify.register`)**: Hooks stay strictly scoped to that plugin and its sub-plugins.
+* **Wrapped Plugin (`fastify-plugin`)**: Encapsulation is bypassed, making the hook run globally.
+* **NestJS Context**: If you are using Fastify inside NestJS, Nest handles routing encapsulation via its own Modules, Guards, and Pipes, but under the hood, native Fastify plugins registered inside Nest still follow these exact scoping rules!
+
+
+Fastify’s encapsulation model is one of its core architectural features.
+
+Here is how hook scoping behaves in practice:
+
+---
+
+### **1. Standard Plugin Behavior (Default Encapsulation)**
+
+When you register a plugin using `fastify.register()`, Fastify creates a new context (a child scope).
+
+* **Request lifecycle hooks** (like `onRequest`, `preHandler`, `preValidation`, `onSend`) added via `fastify.addHook()` inside that plugin will **only execute for routes defined within that plugin or its sub-plugins**.
+* They will **never** execute for routes in sibling plugins or parent scopes.
+
+---
+
+### **2. The Two Exceptions to Watch Out For**
+
+#### **A. Using `fastify-plugin` (`fp`)**
+
+If you wrap your plugin in `fastify-plugin` (or set `Symbol.for('skip-override')`), Fastify intentionally **bypasses encapsulation**. In this case:
+
+* Any hook added inside that plugin breaks out of its local scope and applies **globally** to the parent Fastify instance.
+
+#### **B. Lifecycle Hooks vs. Request Hooks**
+
+* **Request Hooks** (`onRequest`, `preHandler`, `preValidation`, `onError`, etc.) follow strict encapsulation.
+* **Application Lifecycle / Server Hooks** (like `onClose`, `onRoute`, `onRegister`) behave slightly differently:
+* `onClose`: Triggers when the server shuts down, regardless of encapsulation (though it runs in the order of registration).
+* `onRoute` / `onRegister`: Listen for new route/plugin registrations within that scope or downward in child contexts.
+
+
+
+---
+
+### **Summary Rule of Thumb**
+
+If a plugin is registered normally without `fastify-plugin`, its request hooks remain **100% strictly scoped** to that plugin context.

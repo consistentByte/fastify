@@ -5,8 +5,14 @@ import dbConnector from './db-connector.ts';
 import { addItemsToDB, readItemsFromDB } from './db-calls.ts';
 
 declare module 'fastify' {
-  interface FastifyRequest {
+  export interface FastifyRequest {
     user?: object | null; // 👈 Tells TypeScript that req.user is a valid property
+  }
+  export interface FastifyInstance {
+    signJwt: () => string,
+    verifyJwt: () => {
+      name: string
+    }
   }
 }
 
@@ -46,6 +52,11 @@ fastify.post("/api/users/1", {
     res: FastifyReply,
   ) => {
     const body = req.body; // now on hovering on req.body, we see name and age.
+
+    const jwt = fastify.signJwt();
+    const verified = fastify.verifyJwt();
+    console.log(jwt, verified);
+
     return res.code(201).send(req.user);
   },
 });
@@ -179,6 +190,19 @@ fastify.addHook('preHandler', (req: FastifyRequest<{Body: {user: string}}>, res:
 })
 
 
+
+
+// adding a decorator to sign Jwt
+fastify.decorate('signJwt', () => {
+  return 'Signed Jwt';
+})
+
+// adding a decorator to sign Jwt
+fastify.decorate('verifyJwt', () => {
+  return {
+    name: "John wick"
+  };
+})
 
 async function main() {
   await fastify.listen({

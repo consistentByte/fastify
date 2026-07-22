@@ -121,3 +121,29 @@ Enables the use of CORS in a Fastify application.
 and so on https://fastify.dev/ecosystem/
 
 Mongo Express UI => http://localhost:8081/
+
+
+
+const dbConnector = async(fastify: FastifyInstance) => {
+
+  // Fastify instance is provided, in case we are in another file.
+
+
+
+  fastify.register(fastifyMongodb, {
+
+    url: "mongodb://localhost:27017/fastify-db"
+
+  });
+
+
+
+Fastify, plugins created with async need to register and await child plugins using fastify.register(), or use Fastify's plugin helper fp (fastify-plugin).
+
+If you register this plugin without fastify-plugin, Fastify's strict encapsulation mechanism won't make fastify.mongo available outside this dbConnector function.
+
+
+import fp from 'fastify-plugin';
+
+// Wrap with fp to share fastify.mongo globally across the app
+export default fp(dbConnector);

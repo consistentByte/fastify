@@ -1,6 +1,8 @@
 import fastifyMongodb from "@fastify/mongodb";
 import Fastify from "fastify";
 import type { FastifyRequest, FastifyReply, FastifyInstance } from "Fastify";
+import dbConnector from './db-connector.ts';
+import { addItemsToDB, readItemsFromDB } from './db-calls.ts';
 
 const fastify = Fastify({
   logger: {
@@ -134,7 +136,7 @@ fastify.register(userRoutes, {
 });
 
 // writing a plugin for connection to mongo db
-const dbConnector = async (fastify: FastifyInstance) => {
+const dbConnector_ = async (fastify: FastifyInstance) => {
   // Fastify instance is provided, in case we are in another file.
   
   // ignore the error, just a typescript error.
@@ -147,6 +149,15 @@ const dbConnector = async (fastify: FastifyInstance) => {
 
 //registering the dbConnector Plugin
 fastify.register(dbConnector);
+
+//db calls
+fastify.get('/db/add', async (req: FastifyRequest, res: FastifyReply) => {
+  return await addItemsToDB(fastify)(req, res);
+});
+
+fastify.get('/db/get', async (req: FastifyRequest, res: FastifyReply) => {
+  return await readItemsFromDB(fastify)(req, res);
+});
 
 async function main() {
   await fastify.listen({

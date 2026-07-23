@@ -625,3 +625,124 @@ If performance is your top priority, follow this hybrid strategy:
 
 1. **Use Route-Scoped Schemas for 80% of routes**: Use inline schemas (or TypeBox) for route-specific payloads. This provides fast boot times, clean code, and maximum type safety.
 2. **Use `addSchema` for heavy, repeated models**: Register core entities (like `User`, `Product`, or common error formats like `400 Bad Request`) via `addSchema` so Ajv compiles them once and reuses them across endpoints.
+
+## Bonus
+
+Splitting the starting and creation of the server.
+
+cd bonus
+node --experimental-strip-types main.ts
+
+PS E:\Node Workspace\Fastify\fastify\bonus> node --experimental-strip-types main.ts
+(node:6764) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+status:  200
+body:  welcome
+[12:49:49.631] INFO (6764): incoming request
+    reqId: "req-1"
+    req: {
+      "method": "GET",
+      "url": "/",
+      "host": "localhost:80",
+      "remoteAddress": "127.0.0.1"
+    }
+[12:49:49.636] INFO (6764): request completed
+    reqId: "req-1"
+    res: {
+      "statusCode": 200
+    }
+    responseTime: 3.7536999999999807
+PS E:\Node Workspace\Fastify\fastify\bonus>                                        
+
+It stops after executing the route.
+
+Having `main` and `test` in the same file is a simple pattern for demonstrating both **running a real HTTP server** and **testing endpoints in-memory** using the same application factory function (`buildServer`).
+
+Here is a step-by-step breakdown of how the code works:
+
+---
+
+## 1. Application Factory (`buildServer`)
+
+```typescript
+function buildServer() {
+  const fastify = Fastify({
+    logger: {
+      transport: {
+        target: "pino-pretty", // Pretty-prints log output to the terminal
+      },
+    },
+  });
+
+  fastify.get("/", () => "Welcome");
+
+  return fastify;
+}
+
+```
+
+* **Factory Pattern**: Instead of creating a single global `fastify` object, wrapping setup inside `buildServer()` allows you to instantiate independent server instances whenever needed.
+* **Logger**: `pino-pretty` formats log lines into readable text instead of JSON strings.
+* **Route**: Registers a basic `GET /` endpoint returning `"Welcome"`.
+
+---
+
+## 2. Production Runner (`main`)
+
+```typescript
+async function main() {
+  const fastify = buildServer();
+
+  try {
+    const address = await fastify.listen({ port: 3000 });
+    console.log(`Server listening at ${address}`);
+  } catch (err) {
+    fastify.log.error(err);
+    process.exit(1);
+  }
+}
+
+```
+
+* **Real Web Server**: Instantiates `fastify` and calls `.listen()` to open a TCP port on `http://localhost:3000`.
+* **External Access**: Live HTTP clients (browsers, Postman, curl, or frontend apps) can connect to this instance.
+
+---
+
+## 3. In-Memory Test Runner (`test`)
+
+```typescript
+async function test() {
+  const server = buildServer();
+
+  const response = await server.inject({
+    method: "GET",
+    url: "/",
+  });
+
+  console.log("status", response.statusCode); // 200
+  console.log("body", response.body);         // "Welcome"
+}
+
+```
+
+* **Isolated Testing**: Calls `buildServer()` to get a fresh, isolated server instance without touching port `3000`.
+* **`server.inject()`**: Fastify's built-in HTTP request simulator. It sends mock requests directly through the router **without binding to a network port or opening sockets**.
+* **Fast & Safe**: Runs lightning-fast and avoids `EADDRINUSE` errors, making it ideal for unit and integration testing frameworks like Vitest or Jest.
+
+---
+
+## 💡 How to Execute Them
+
+In a production setup, you typically split these into separate files (`server.ts` calling `main()` and `server.test.ts` calling `test()`).
+
+If you want to run them in the same file for quick script testing, call either function at the end of the file:
+
+```typescript
+// To start the live server:
+main();
+
+// OR to execute the in-memory test script:
+// test();
+
+```

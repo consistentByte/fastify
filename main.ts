@@ -94,9 +94,9 @@ fastify.post(
   },
 );
 
-fastify.get('/err', () => {
+fastify.get("/err", () => {
   return "ERROR";
-})
+});
 
 // plugins
 // most common plugin in fastify is grouping for the routes.
@@ -217,6 +217,23 @@ fastify.decorate("verifyJwt", () => {
   return {
     name: "John wick",
   };
+});
+
+// adding Schema Validation
+fastify.addSchema({
+  $id: "createUserSchema",
+  type: "object",
+  required: ["name"],
+  properties: {
+    name: { type: "string" },
+  },
+});
+
+fastify.post("/create/user", {
+  schema: { body: { $ref: "createUserSchema#" } },
+  handler: (req, res: FastifyReply) => {
+    return req.body;
+  },
 });
 
 async function main() {

@@ -445,3 +445,183 @@ If you wrap your plugin in `fastify-plugin` (or set `Symbol.for('skip-override')
 ### **Summary Rule of Thumb**
 
 If a plugin is registered normally without `fastify-plugin`, its request hooks remain **100% strictly scoped** to that plugin context.
+
+### Error on adding Body schema in get
+
+In Fastify, HTTP methods like GET and HEAD do not expect request bodies. Therefore, Fastify explicitly disallows setting a schema.body on a GET route and throws:
+FastifyError: Body validation schema for GET:/create/user route is not supported!
+
+  Change .get() to .post() (Recommended)
+
+  Use querystring schema for GET requests
+    If this must remain a GET request and you are receiving data via query parameters
+
+
+Schema Validation Methods:
+  1] Direct route based:
+      const schema = {
+      body: {
+        type: "object",
+        required: ["name"], // Optional: makes name field required
+        properties: {
+          name: { type: "string" },
+          age: { type: "number" },
+        },
+      },
+    };
+
+    const opts = { schema };
+
+    fastify.post(
+      "/api/users/2",
+      opts,
+      async (...
+  
+  2] fastify.addSchema and ref based search approach
+    fastify.addSchema({
+    $id: "createUserSchema",
+    type: "object",
+    required: ["name"],
+    properties: {
+      name: { type: "string" },
+    },
+    });
+
+    fastify.post("/create/user", {
+    schema: { body: { $ref: "createUserSchema#" } },
+    handler: (req, res: FastifyReply) => {
+      return req.body;
+    },
+    });
+
+
+### When to use which?
+
+For standard production applications, **defining inline / route-scoped schemas (`const schema = { ... }`) is generally preferred** over `addSchema` with `$ref` strings.
+
+However, each approach has specific use cases:
+
+---
+
+## 🏆 The Recommended Approach: Route-Scoped Schemas
+
+```typescript
+const createUserSchema = {
+  body: {
+    type: "object",
+    required: ["name"],
+    properties: {
+      name: { type: "string" },
+      age: { type: "number" },
+    },
+  },
+} as const; // 👈 using 'as const' helps TS inference
+
+fastify.post("/api/users", { schema: createUserSchema }, async (req, reply) => {
+  return req.body;
+});
+
+```
+
+### Why this is better for production:
+
+1. **TypeScript Type Safety**: When using libraries like **TypeBox** or **Zod** (which pair with route-scoped schemas), Fastify can automatically infer the TypeScript type of `req.body` without needing `$ref` lookups.
+2. **Local Context & Readability**: Keep the validation logic right next to the route definition or in a dedicated `schema.ts` file alongside the route handler.
+3. **Fewer String Ref Bugs**: String identifiers in `$ref: "createUserSchema#"` can silently break or cause runtime look-up errors if renamed or improperly formatted.
+
+---
+
+## 🏢 When `fastify.addSchema` + `$ref` makes sense
+
+`addSchema` creates a shared dictionary of JSON Schemas across your Fastify instance.
+
+```typescript
+fastify.addSchema({
+  $id: "userSchema",
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    name: { type: "string" }
+  }
+});
+
+```
+
+### Good use cases:
+
+* **Shared Models / DTOs**: You have core models (like a `User` entity) referenced across dozens of routes or nested inside complex response schemas (`{ $ref: "userSchema#" }`).
+* **Swagger/OpenAPI Standardization**: Component reusability in generated documentation.
+
+---
+
+## ⚡ Production Best Practice: Use TypeBox or Zod
+
+In modern TypeScript Fastify apps, writing raw JSON schema objects by hand is usually replaced with **TypeBox** (`@sinclair/typebox`). It gives you JSON schema validation **and** automatic TypeScript types in one single definition:
+
+```typescript
+import { Type, Static } from '@sinclair/typebox';
+
+// 1. Single definition for both Schema and TS Type
+const CreateUserSchema = Type.Object({
+  name: Type.String(),
+  age: Type.Optional(Type.Number())
+});
+
+type CreateUserType = Static<typeof CreateUserSchema>;
+
+// 2. Use in route
+fastify.post<{ Body: CreateUserType }>(
+  '/api/users',
+  { schema: { body: CreateUserSchema } },
+  async (req, reply) => {
+    // req.body is automatically typed as { name: string, age?: number }
+    return req.body;
+  }
+);
+
+```
+
+### Summary Recommendation
+
+* **Small/Medium Apps or Modular Routes**: Use **Route-scoped inline schemas** (preferably with TypeBox or Zod).
+* **Large Apps with repeated model definitions**: Combine route-scoped schemas with **`addSchema`** strictly for shared model definitions.
+
+When it comes to **pure validation performance** in Fastify, **both methods perform identically**.
+
+This is because Fastify compiles **all schemas** (whether inline or added via `addSchema`) into optimized JavaScript functions at server startup using **Ajv** (Another JSON Schema Validator). By the time your API receives a request, the schema format you wrote makes zero difference—Fastify executes the exact same pre-compiled validation code in memory.
+
+However, from an **architecture, memory, and runtime perspective**, here is how they compare:
+
+---
+
+## 📊 Performance & Memory Breakdown
+
+| Factor | Route-Scoped Inline (`const schema = {}`) | Shared Repository (`fastify.addSchema`) |
+| --- | --- | --- |
+| **Request Throughput (RPS)** | ⚡ Fast (Equal) | ⚡ Fast (Equal) |
+| **Startup / Boot Time** | 🚀 **Faster** (Direct compilation) | 🐢 **Slightly Slower** (Ajv must resolve `$ref` graphs) |
+| **Memory Footprint** | ⚠️ Higher if duplicate schemas are copy-pasted | 🟢 **Lower** (Schemas are reused in memory) |
+| **Validation Speed** | ⚡ Instant pre-compiled execution | ⚡ Instant pre-compiled execution |
+
+---
+
+## 🔍 Detailed Differences
+
+### 1. Startup Performance
+
+* **Inline Schemas**: Fastify compiles each schema directly on startup.
+* **`addSchema` with `$ref**`: Fastify and Ajv must crawl the schema dependency tree, resolve references, and ensure no circular `$ref` bugs exist before compiling. In apps with hundreds of routes, this can slightly increase your server startup time.
+
+### 2. Memory Footprint
+
+* **Inline Schemas**: If you copy and paste the same 50-line JSON schema across 10 different route files, Ajv will compile 10 separate validation functions in memory.
+* **`addSchema`**: Reusing shared `$ref` components allows Ajv to reuse compiled definitions, reducing memory usage in large applications.
+
+---
+
+## 💡 Which gives the best overall performance in production?
+
+If performance is your top priority, follow this hybrid strategy:
+
+1. **Use Route-Scoped Schemas for 80% of routes**: Use inline schemas (or TypeBox) for route-specific payloads. This provides fast boot times, clean code, and maximum type safety.
+2. **Use `addSchema` for heavy, repeated models**: Register core entities (like `User`, `Product`, or common error formats like `400 Bad Request`) via `addSchema` so Ajv compiles them once and reuses them across endpoints.
